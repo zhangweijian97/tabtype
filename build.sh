@@ -1,15 +1,15 @@
 #!/bin/bash
-# 构建链：源码 → swift build release → 组装 .app → 固定本地证书签名（TCC 权限稳定性，设计 §五.3）
+# 构建链：swift build release → 组装 .app → 签名（本地证书优先，缺失回退 ad-hoc）
 set -euo pipefail
 cd "$(dirname "$0")"
 ROOT="$(pwd)"
 
-swift build -c release --package-path 源码
+swift build -c release
 
-APP="构建/TabType.app"
+APP="TabType.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "源码/.build/release/TabType" "$APP/Contents/MacOS/TabType"
+cp ".build/release/TabType" "$APP/Contents/MacOS/TabType"
 
 cat > "$APP/Contents/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -25,20 +25,24 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
+	<string>0.3.0</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>CmdTap 复现（个人使用）</string>
+	<string>Copyright (c) 2026 zhangweijian97 (MIT License)</string>
 </dict>
 </plist>
 EOF
 
-codesign --force --sign "CmdTap2 Local Dev" "$APP"
+# 本地开发证书（TCC 权限随重编译不丢）优先；外部环境无此证书时回退 ad-hoc 签名
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "CmdTap2 Local Dev"; then
+	codesign --force --sign "CmdTap2 Local Dev" "$APP"
+else
+	codesign --force --sign - "$APP"
+fi
 
-# 冒烟（设计 §七.4：产物可运行性——能启动、能自查架构）
 echo "构建产物: $APP"
 file "$APP/Contents/MacOS/TabType" | grep -q "arm64" && echo "架构: arm64 原生 ✓"
 plutil -lint "$APP/Contents/Info.plist" >/dev/null && echo "Info.plist 合法 ✓"
