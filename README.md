@@ -5,6 +5,8 @@
 
 复刻自 2017 年后停更的 [CmdTap](https://www.yingdev.com/)（YingDev 出品）。原版是 Intel-only 二进制，依赖 Rosetta 2 运行；随着 Apple 移除 Rosetta，它在 Apple Silicon Mac 上即将彻底失效。TabType 是 arm64 原生重写，仅约 600 行 Swift，零第三方依赖。
 
+![switcher with letter badges](docs/switcher-badges.png)
+
 ## 功能
 
 - **⌘Tab 唤起系统原生切换器**（不是替代品——扩展它）
@@ -28,7 +30,7 @@
 ./build.sh          # swift build → 组装 .app → ad-hoc 或本地证书签名
 ```
 
-macOS 13+，Apple Silicon 原生。技术上通过 Accessibility API（AXProcessSwitcherList）操纵原生切换器——在 macOS 26 上实测可用；入口是屏幕中心点取+父链爬升（Dock 的 windows 属性在新系统已不可用，详见 `设计/系统设计.md`）。
+macOS 13+，Apple Silicon 原生。技术上通过 Accessibility API（AXProcessSwitcherList）操纵原生切换器——在 macOS 26 上实测可用；入口是屏幕中心点取+父链爬升（Dock 的 windows 属性在新系统已不可用）。
 
 ## 已知限制
 
