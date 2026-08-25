@@ -23,8 +23,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // activate 带重试轮询，异步派发——不能阻塞 tap 回调（Tab 事件需立即透传，
         // 否则系统切换器不弹出，AX 查找永等不到目标）
         engine.onSwitcherActivate = { [weak self] in
+            guard let self else { return }
+            let cmdHeld = { [weak self] in self?.engine.isCmdHeld ?? false }
             DispatchQueue.global(qos: .userInteractive).async {
-                self?.bridge.activate()
+                self.bridge.activate(shouldContinue: cmdHeld)
             }
         }
         engine.onLetter = { [weak self] letter in

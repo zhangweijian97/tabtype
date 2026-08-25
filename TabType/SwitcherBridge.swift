@@ -43,10 +43,13 @@ final class SwitcherBridge {
 
     /// ⌘Tab 触发时调用。切换器 AX 元素可能延迟出现，重试等待。
     /// 探针 v2：三路并测定位切换器在 AX 树的形态（Dock windows / 系统焦点 / 屏幕中心点取）。
-    func activate() {
+    /// 2026-08-25 高负载事故（OneDrive 风暴夜，load 7-11）：AX 查询变慢，固定 24轮×40ms≈1s
+    /// 预算大面积超时（当日 62 次"未找到"）。改为：预算扩至 2.4s；以「⌘ 仍按住」为继续
+    /// 探测条件——松开即切换器关闭、再探无意义，提前中止（快切反而更快放弃，不白等）。
+    func activate(shouldContinue: (() -> Bool)? = nil) {
         switcherElement = nil
         storeSnapshot(.empty)
-        for round in 0..<24 {
+        for round in 0..<60 {
             if let el = findSwitcher() {
                 switcherElement = el
                 loadItems()
@@ -58,10 +61,18 @@ final class SwitcherBridge {
                 showOverlay()
                 return
             }
+            if let shouldContinue, !shouldContinue() {
+                if round >= 24 {
+                    DebugLog.shared.log("activate: 未找到切换器元素（⌘松开中止于第\(round)轮，已超旧预算1s——AX 响应异常慢）")
+                } else {
+                    DebugLog.shared.verbose("activate: ⌘已松开中止探测（第\(round)轮，快切无碍）")
+                }
+                return
+            }
             Thread.sleep(forTimeInterval: 0.04)
         }
 
-        DebugLog.shared.log("activate: 未找到切换器元素（重试24轮×40ms后放弃）")
+        DebugLog.shared.log("activate: 未找到切换器元素（重试60轮×40ms=2.4s后放弃——AX 响应过慢，系统高负载或 Dock 异常）")
     }
 
     /// 字母跳转：匹配 abbr 前缀，循环推进，AX 写选中。

@@ -17,6 +17,9 @@ final class TriggerEngine {
         case switcherActive
     }
     private var state: State = .idle
+    /// activate 探测的继续条件（⌘ 按住=切换器可能还在屏上）。tap 回调(主线程)写、
+    /// 探测后台线程读；无锁读取最坏多探一轮，无害。
+    var isCmdHeld: Bool { state != .idle }
     private var eventTap: CFMachPort?
 
     private static let cmdKeyCode: Int64 = 0x37
