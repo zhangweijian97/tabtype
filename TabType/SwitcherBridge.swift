@@ -121,24 +121,36 @@ final class SwitcherBridge {
 
     // MARK: - AX 基础
 
-    // macOS 26.5 实测：屏幕中心点取——切换器固定在屏幕中央。
-    // elementAtPosition 命中的是最深层元素（常是中央图标按钮），需向上爬父链找
-    // subrole=AXProcessSwitcherList（实测中心命中 AXButton title=微信 → parent=List）
+    // macOS 26.5 实测：切换器通过 elementAtPosition 坐标点取暴露（不在任何应用的窗口列表里），
+    // 命中的是最深层元素（常是中央图标按钮），需向上爬父链找 subrole=AXProcessSwitcherList。
+    // 多屏（2026-08-31 实证）：① 切换器出现在持有键盘焦点的屏，与 NSScreen.main 不必然一致，
+    // 须遍历所有屏；② AX 坐标空间是 CGDisplayBounds（左上原点），不是 NSScreen.frame（左下原点）
+    // ——单主屏时两者中心恰好相同，一直未暴露；③ 切换器不一定在屏中心（实测在约 1/4 宽度处
+    // 命中，疑似跟随焦点窗口居中），故每屏扫 3×3 候选点。
     private func findSwitcher() -> AXUIElement? {
         let sw = AXUIElementCreateSystemWide()
         var element: AXUIElement?
-        let screen = NSScreen.main?.frame ?? .zero
-        let err = AXUIElementCopyElementAtPosition(sw, Float(screen.midX), Float(screen.midY), &element)
-        guard err == .success, var cur = element else { return nil }
-        for _ in 0..<6 {
-            if let subrole = string(cur, kAXSubroleAttribute as CFString),
-               subrole == "AXProcessSwitcherList" {
-                return cur
+        for screen in NSScreen.screens {
+            guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else { continue }
+            let bounds = CGDisplayBounds(id)
+            for fx in [0.25, 0.5, 0.75] {
+                for fy in [0.25, 0.5, 0.75] {
+                    let x = bounds.minX + bounds.width * fx
+                    let y = bounds.minY + bounds.height * fy
+                    let err = AXUIElementCopyElementAtPosition(sw, Float(x), Float(y), &element)
+                    guard err == .success, var cur = element else { continue }
+                    for _ in 0..<6 {
+                        if let subrole = string(cur, kAXSubroleAttribute as CFString),
+                           subrole == "AXProcessSwitcherList" {
+                            return cur
+                        }
+                        var ref: AnyObject?
+                        guard AXUIElementCopyAttributeValue(cur, kAXParentAttribute as CFString, &ref) == .success,
+                              let parent = ref as! AXUIElement? else { break }
+                        cur = parent
+                    }
+                }
             }
-            var ref: AnyObject?
-            guard AXUIElementCopyAttributeValue(cur, kAXParentAttribute as CFString, &ref) == .success,
-                  let parent = ref as! AXUIElement? else { return nil }
-            cur = parent
         }
         return nil
     }
@@ -164,6 +176,18 @@ final class SwitcherBridge {
             DebugLog.shared.log("overlay: 切换器 frame 读取失败")
             return
         }
+        // AX 返回左上原点全局坐标，NSWindow.setFrame/绘制按 AppKit 左下原点解释——
+        // 多屏（2026-08-31）下两者不再重合，按主屏高度翻转 y 后再交给覆盖层。
+        let axToAppKit: (CGFloat) -> CGFloat = { axY in
+            let primaryHeight = NSScreen.screens.first?.frame.maxY ?? 0
+            return primaryHeight - axY
+        }
+        let swFrameAppKit = NSRect(
+            x: swFrame.minX,
+            y: axToAppKit(swFrame.maxY),
+            width: swFrame.width,
+            height: swFrame.height
+        )
         let snap = loadSnapshot()
         var items: [LetterOverlay.Item] = []
         var positionsDump = ""
@@ -187,14 +211,15 @@ final class SwitcherBridge {
             guard let pos = position(of: el) else { continue }
             guard let size = size(of: el) else { continue }
             guard let display = displayFor[i] else { continue }
-            // 徽章 x=图标几何中心，y≈图形下沿（基线96 + 用户↑↓校准-80，2026-08-19 定稿）
-            let badgeYOffset: CGFloat = 16
-            items.append(.init(letter: display, center: CGPoint(x: pos.x + size.width / 2, y: pos.y + badgeYOffset)))
+            // 徽章 x=图标几何中心，y=图标底边上方 16（按几何语义直接算，不依赖坐标
+            // 约定的历史魔数——多屏统一换算后旧 +16 的含义会漂移，2026-08-31 修正）
+            let badgeAXY = pos.y + size.height - 16
+            items.append(.init(letter: display, center: CGPoint(x: pos.x + size.width / 2, y: axToAppKit(badgeAXY))))
             if i < 3 { positionsDump += " [\(i)] pos=\(Int(pos.x)),\(Int(pos.y)) size=\(Int(size.width))x\(Int(size.height))" }
         }
-        DebugLog.shared.log("overlay: \(items.count)/\(snap.elements.count) 项，swFrame=\(Int(swFrame.minX)),\(Int(swFrame.minY)) \(Int(swFrame.width))x\(Int(swFrame.height))\(positionsDump)")
+        DebugLog.shared.log("overlay: \(items.count)/\(snap.elements.count) 项，swFrameAX=\(Int(swFrame.minX)),\(Int(swFrame.minY)) swFrameAppKit=\(Int(swFrameAppKit.minX)),\(Int(swFrameAppKit.minY)) \(Int(swFrame.width))x\(Int(swFrame.height))\(positionsDump)")
 
-        overlay.show(items: items, switcherFrame: swFrame)
+        overlay.show(items: items, switcherFrame: swFrameAppKit)
     }
 
     private func size(of el: AXUIElement) -> CGSize? {
