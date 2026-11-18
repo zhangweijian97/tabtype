@@ -5,12 +5,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let engine = TriggerEngine()
     let bridge = SwitcherBridge()
     private var statusItem: NSStatusItem?
+    private var axTrusted = true
+    private let secureInput = SecureInputMonitor()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
 
         let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         let trusted = AXIsProcessTrustedWithOptions(opts)
+        axTrusted = trusted
         TriggerEngine.debugLog.log("启动: pid=\(ProcessInfo.processInfo.processIdentifier) AXTrusted=\(trusted)")
         if !trusted {
             statusItem?.button?.title = "⚠︎"
@@ -19,6 +22,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             TriggerEngine.debugLog.log("启动: event tap 创建失败（权限未授予）——功能不可用")
             return
         }
+
+        secureInput.onStuck = { [weak self] in
+            self?.statusItem?.button?.title = "🔒"
+        }
+        secureInput.onRelease = { [weak self] in
+            self?.statusItem?.button?.title = (self?.axTrusted ?? true) ? "⌘" : "⚠︎"
+        }
+        secureInput.start()
 
         // activate 带重试轮询，异步派发——不能阻塞 tap 回调（Tab 事件需立即透传，
         // 否则系统切换器不弹出，AX 查找永等不到目标）
@@ -51,9 +62,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.title = "⌘"
         let menu = NSMenu()
 
-        let info = NSMenuItem(title: "⌘Tab 唤起原生切换器后，按住 ⌘ 敲应用名/拼音首字母选中；同字母多应用连按推进；松开 ⌘ 切换；按住 fn 豁免", action: nil, keyEquivalent: "")
-        info.isEnabled = false
-        menu.addItem(info)
+        // 说明拆成三行短句：单行长句会把整个菜单撑到 700pt 宽（2026-11-18 用户反馈）
+        addHint("⌘Tab 唤起切换器后，敲应用名或拼音首字母选中", to: menu)
+        addHint("同字母连按切换下一个；松开 ⌘ 跳到选中项", to: menu)
+        addHint("按住 fn 豁免拦截（走系统原生切换）", to: menu)
         menu.addItem(.separator())
 
         let launch = NSMenuItem(title: "开机自动运行", action: #selector(toggleLaunch), keyEquivalent: "")
@@ -71,6 +83,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         item.menu = menu
         statusItem = item
+    }
+
+    /// 菜单说明行：小字号、灰显（不抢菜单宽度）
+    private func addHint(_ text: String, to menu: NSMenu) {
+        let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        item.attributedTitle = NSAttributedString(
+            string: text,
+            attributes: [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)]
+        )
+        menu.addItem(item)
     }
 
     @objc private func toggleLaunch() {

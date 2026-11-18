@@ -165,7 +165,7 @@ final class SwitcherBridge {
         let titles = children.compactMap { string($0, kAXTitleAttribute as CFString) }
         let running = NSWorkspace.shared.runningApplications
         let dates = titles.map { title in
-            running.first(where: { ($0.localizedName ?? "") == title })?.launchDate ?? .distantPast
+            running.first(where: { ($0.localizedName ?? "") == title })?.launchDate ?? .distantFuture
         }
         storeSnapshot(Snapshot(titles: titles, elements: elements, launchDates: dates))
     }
